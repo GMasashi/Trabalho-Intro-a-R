@@ -1,0 +1,368 @@
+---
+title: "Trabalho R"
+author: "Gustavo Masashi Tiba Hoshima"
+date: ''
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+Este trabalho foi feito utilizando os dados do Sistema Nacional de Informações sobre Saneamento(SNIS) obtido da Bases dos Dados e do
+Atlas do Desenvolvimento Humano. 
+
+Links: 
+SNIS - https://basedosdados.org/dataset/2a543ad8-3cdb-4047-9498-efe7fb8ed697?table=df7cf198-4889-4baf-bb77-4e0e28eb90ca
+Atlas - http://www.atlasbrasil.org.br
+
+```{r Como reproduzir }
+#Versão do R: 4.4.2
+
+#Serão usadas as seguintes bibliotecas:readr,readxl,dplyr,janitor,ggplot2,scales,ggrepel,geobr,sf
+#Para renderizar o código em html clique em knit e 'Knit to HTML'
+
+#Substitua o caminho do arquivo nas seguintes variáveis caso queira rodar o código localmente
+arq_snis  <- 'C:\\Users\\Desk-Top\\Downloads\\br_mdr_snis_municipio_agua_esgoto.csv'
+arq_extra <- 'C:\\Users\\Desk-Top\\Downloads\\data.xlsx'
+
+```
+
+
+```{r }
+#Carregando as bibliotecas usadas
+library(readr)
+library(readxl)  
+library(dplyr)  
+library(janitor) 
+library(ggplot2)
+library(scales)
+library(ggrepel)
+library(geobr)
+library(sf)
+```
+
+```{r }
+#Carregando os dados do CSV para o R
+snis <- readr::read_csv(arq_snis, show_col_types = FALSE) |>
+  janitor::clean_names()
+
+snis <- readr::read_csv(arq_snis, show_col_types = FALSE) |>
+  janitor::clean_names()
+
+aba1  <- readxl::excel_sheets(arq_extra)[1]
+extra <- readxl::read_excel(arq_extra, sheet = aba1) |>
+  janitor::clean_names()
+
+#Filtrando só para os anos de 2020 e 2021 
+anos_alvo <- c(2020, 2021)
+snis_20_21 <- snis |>
+  dplyr::filter(.data[['ano']] %in% anos_alvo)
+
+```
+
+```{r }
+
+#Funções criadas pelo ChatGPT para a filtragem dos DF
+pega_col <- function(df, candidatas) {
+  hit <- intersect(candidatas, names(df))
+  if (length(hit) == 0) NA_character_ else hit[[1]]
+}
+normaliza_id_mun <- function(x){
+  x <- as.character(x)
+  x <- stringr::str_replace_all(x, "\\D", "")
+  stringr::str_pad(x, 7, "left", "0")
+}
+pega_ano <- function(df) pega_col(df, c("ano","year","exercicio","competencia"))
+pega_id  <- function(df) pega_col(df, c("id_municipio","id_municipio_ibge","cod_municipio","codigo_municipio","id_municipio_7"))
+
+```
+
+
+
+```{r }
+#Removendo as últimas 3 lihas (São apenas linhas com NA )
+extra <- extra %>% slice(1:(n() - 3))
+
+
+#Removendo colunas desnecessárias
+cols_para_excluir <- c("id_municipio",'quantidade_sede_municipal_agua','quantidade_sede_municipal_esgoto','quantidade_localidade_agua',
+                       'quantidade_localidade_esgoto','volume_agua_bruta_exportado','volume_agua_tratada_importado',
+                       'volume_agua_tratada_exportado','volume_esgoto_bruto_exportado','volume_esgoto_bruto_importado','volume_esgoto_importado',
+                       'volume_esgoto_bruto_exportado_tratamento_importador') 
+
+snis_20_21_col <- snis_20_21 %>%
+  select(-any_of(cols_para_excluir))
+
+#Filtrando o Data Frame por ano
+snis_2020 <- snis_20_21_col %>% filter(.data[['ano']] == 2020)
+snis_2021 <- snis_20_21_col %>% filter(.data[['ano']] == 2021)
+
+```
+
+```{r }
+#Redefinindo nomes para facilitar
+df <- snis_2020
+df2 <- snis_2021
+
+
+# identifica colunas (utilizei o ChatGPT para criar essas funções)
+idx_cols <- names(df)[startsWith(names(df), "indice")]
+num_cols <- names(df)[sapply(df, is.numeric)]
+sum_cols <- setdiff(num_cols, c(idx_cols, "sigla_uf"))
+
+idx_cols2 <- names(df2)[startsWith(names(df2), "indice")]
+num_cols2 <- names(df2)[sapply(df, is.numeric)]
+sum_cols2 <- setdiff(num_cols2, c(idx_cols2, "sigla_uf"))
+
+# Agrega por UF
+res_por_uf <- df %>%
+  group_by(sigla_uf) %>%
+  summarise(
+    across(all_of(sum_cols),  ~ sum(.x,  na.rm = TRUE)),
+    across(all_of(idx_cols),  ~ mean(.x, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+res_por_uf2 <- df2 %>%
+  group_by(sigla_uf) %>%
+  summarise(
+    across(all_of(sum_cols2),  ~ sum(.x,  na.rm = TRUE)),
+    across(all_of(idx_cols2),  ~ mean(.x, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+#Removendo a coluna de anos já todos os dados de cada dataframe são referentes ao mesmo ano
+sn_2020 <- res_por_uf %>% select(-ano)
+sn_2021 <- res_por_uf2 %>% select(-ano)
+
+#ChatGPT - usei para criar uma função que agregue todos os estados e crie uma linha do Brasil
+agrega_brasil_snis <- function(df) {
+  idx_cols <- names(df)[startsWith(names(df), "indice")]             # médias
+  num_cols <- names(df)[vapply(df, is.numeric, logical(1))]          # numéricas
+  sum_cols <- setdiff(num_cols, idx_cols)                            # somas
+
+  df %>%
+    summarise(
+      across(all_of(sum_cols),  ~ sum(.x,  na.rm = TRUE), .names = "{.col}"),
+      across(all_of(idx_cols),  ~ mean(.x, na.rm = TRUE), .names = "{.col}")
+    ) %>%
+    mutate(sigla_uf = "BR") %>%
+    relocate(sigla_uf)
+}
+
+com_br20 <- agrega_brasil_snis(sn_2020)
+com_br21 <- agrega_brasil_snis(sn_2021)
+
+#Adicionando linha do 'BR' ao data-frame
+snis2_20 <- bind_rows(sn_2020, com_br20)
+snis2_21 <- bind_rows(sn_2021, com_br21)
+
+```
+
+
+```{r }
+#Utilizei o ChatGPT para criar uma função que trocasse o estado pela sigla de UF para poder agrupar com a outra tabela
+padroniza_territorialidades <- function(extra) {
+  stopifnot("territorialidades" %in% names(extra))
+  if (!requireNamespace("dplyr", quietly = TRUE)) stop("Instale 'dplyr'.")
+  if (!requireNamespace("stringr", quietly = TRUE)) stop("Instale 'stringr'.")
+  if (!requireNamespace("stringi", quietly = TRUE)) stop("Instale 'stringi'.")
+
+  # mapa nome -> sigla (chave em minúsculas e sem acento)
+  mapa_uf <- c(
+    "acre"="AC","alagoas"="AL","amapa"="AP","amazonas"="AM","bahia"="BA",
+    "ceara"="CE","distrito federal"="DF","espirito santo"="ES","goias"="GO",
+    "maranhao"="MA","mato grosso"="MT","mato grosso do sul"="MS","minas gerais"="MG",
+    "para"="PA","paraiba"="PB","parana"="PR","pernambuco"="PE","piaui"="PI",
+    "rio de janeiro"="RJ","rio grande do norte"="RN","rio grande do sul"="RS",
+    "rondonia"="RO","roraima"="RR","santa catarina"="SC","sao paulo"="SP",
+    "sergipe"="SE","tocantins"="TO"
+  )
+
+  dplyr::mutate(
+    extra,
+    # normaliza para comparar
+    .norm = stringr::str_to_lower(stringi::stri_trans_general(territorialidades, "Latin-ASCII")),
+    .norm = stringr::str_trim(.norm),
+    territorialidades = dplyr::case_when(
+      .norm == "brasil" ~ "BR",
+      .norm %in% names(mapa_uf) ~ mapa_uf[.norm],
+      # se já vier como sigla (2 letras), mantém em maiúsculas
+      nchar(territorialidades) == 2 ~ toupper(territorialidades),
+      TRUE ~ territorialidades
+    )
+  ) |>
+    dplyr::select(-.norm)
+}
+
+extra <- padroniza_territorialidades(extra)
+```
+
+
+
+```{r }
+
+#Uso de ChatGPT - Esta função separa por ano as colunas referentes ao ano de 2020 e 2021
+separa_extra_20_21 <- function(extra, id_cols = NULL) {
+  # Colunas que NÃO terminam em 2020/2021 (ids, chaves, etc.)
+  if (is.null(id_cols)) {
+    id_cols <- names(extra)[!grepl("(2020|2021)$", names(extra))]
+  }
+
+  cols20 <- c(id_cols, grep("2020$", names(extra), value = TRUE))
+  cols21 <- c(id_cols, grep("2021$", names(extra), value = TRUE))
+
+  extra_2020 <- extra %>%
+    select(all_of(cols20)) %>%
+    rename_with(~ sub("_?2020$", "", .x), ends_with("2020"))
+
+  extra_2021 <- extra %>%
+    select(all_of(cols21)) %>%
+    rename_with(~ sub("_?2021$", "", .x), ends_with("2021"))
+
+  list(extra_2020 = extra_2020, extra_2021 = extra_2021)
+}
+
+res <- separa_extra_20_21(extra)
+
+extra_2020 <- res$extra_2020
+extra_2021 <- res$extra_2021
+
+extra_2020 <- extra_2020 %>% rename(sigla_uf = territorialidades)
+extra_2021 <- extra_2021 %>% rename(sigla_uf = territorialidades)
+```
+
+```{r Merge dos data-frames}
+#Juntando as duas bases de dados dividindo por ano e agrupando pelo estado
+
+base_2020 <- snis2_20 %>%
+  left_join(extra_2020, by = "sigla_uf", suffix = c("_snis", "_extra"))
+
+base_2021 <- snis2_21 %>%
+  left_join(extra_2021, by = "sigla_uf", suffix = c("_snis", "_extra"))
+
+```
+
+```{r Glossário }
+#Os principais data-frames utilizados são base_2020 e base_2021 que são formados pela fusão das duas bases de dados agrupadas pelo ano.
+#Esses data-frames possuem colunas sobre o sistema de abastecimento de água e esgoto nacional assim como índices de desenvolvimento humano
+# e renda per capita
+```
+
+
+## Definições das variáveis
+
+- **Índice de atendimento total de água**  
+  Percentual da população (no nosso caso, **por estado**) atendida por **sistema de abastecimento de água**.
+
+- **Índice de atendimento total de esgoto (entre atendidos com água)**  
+  Percentual da população que **possui acesso a serviços de esgoto** **dentre** aqueles que **já têm acesso à água**.
+
+- **Renda per capita**  
+  Média da renda **por indivíduo**.
+
+Gráfico 1
+```{r,fig.align='center', out.width='75%', fig.cap='Renda vs atendimento (2021)'}
+df <- base_2020   # ou: df <- base_2021
+
+#Auxílio do ChatGPT para formulação de todos os gráficos
+plot_df <- df %>%
+  select(sigla_uf, renda_per_capita, indice_atendimento_total_agua) %>%
+  filter(!is.na(sigla_uf), !is.na(renda_per_capita), !is.na(indice_atendimento_total_agua)) %>%
+  mutate(is_br = sigla_uf == "BR")
+
+ggplot(plot_df, aes(x = renda_per_capita, y = indice_atendimento_total_agua)) +
+  # todos os pontos com o MESMO tamanho; BR apenas com cor diferente
+  geom_point(aes(color = is_br), alpha = 0.7, size = 2) +
+  scale_color_manual(values = c(`FALSE` = "grey60", `TRUE` = "red"), guide = "none") +
+  # rótulos das UFs (opcional)
+  geom_text_repel(aes(label = sigla_uf), size = 3.5, max.overlaps = Inf) +
+  scale_x_continuous(labels = label_number()) +
+  labs(
+    x = "Renda per capita",
+    y = "Índice de atendimento total de água",
+    title = "Renda per capita vs Índice de atendimento total de água (2021)"
+  ) +
+  theme_minimal()
+```
+
+Como o gráfico indica, os estados com uma maior renda per capita, em geral, possuem um maior atendimento total de água.
+É possível notar que os estados em que o atendimento total de água é abaixo da média brasileira são estados que possuem uma renda per
+capita inferior a média nacional.
+
+
+
+Gráfico 2
+```{r ,fig.align='center', out.width='75%', fig.cap='Renda per capita vs Índice atendimento de esgoto p/aqueles com acesso à água'}
+df <- base_2020   # ou: df <- base_2021
+
+plot_df <- df %>%
+  select(sigla_uf, renda_per_capita, indice_atendimento_esgoto_agua) %>%
+  filter(!is.na(sigla_uf),
+         !is.na(renda_per_capita),
+         !is.na(indice_atendimento_esgoto_agua)) %>%
+  mutate(is_br = sigla_uf == "BR")
+
+ggplot(plot_df, aes(x = renda_per_capita, y = indice_atendimento_esgoto_agua)) +
+  geom_point(aes(color = is_br), alpha = 0.7, size = 2) +
+  scale_color_manual(values = c(`FALSE` = "grey60", `TRUE` = "red"), guide = "none") +
+  geom_text_repel(aes(label = sigla_uf), size = 3.5, max.overlaps = Inf) +
+  scale_x_continuous(labels = label_number()) +
+  labs(
+    x = "Renda per capita",
+    y = "Índice de atendimento esgoto/água",
+    title = "Renda per capita vs Índice atendimento de esgoto p/aqueles com acesso à água "
+  ) +
+  theme_minimal()
+```
+A partir deste gráfico podemos notar um alta discrepância entre aqueles que possuem acesso aos serviços de esgoto e de água com aqueles
+que apenas possuem atendimento total de água.
+
+Aproximadamente, apenas 22% dos estados brasileiros possuem um atendimento de esgoto e água para um percentual maior que 50% da sua população.
+Simultaneamente, menos da metade da população brasileira possui acesso aos serviços de esgoto (coleta, transporte, tratamento e destinação final adequados do esgoto).
+
+```{r , fig.align='center', out.width='75%', fig.cap='Índice de atendimento esgoto/água por UF'}
+df <- base_2021 
+
+# 1) Tabela por UF
+map_dat <- df %>%
+  filter(sigla_uf != "BR") %>%                            
+  group_by(sigla_uf) %>%
+  summarise(indice_atendimento_esgoto_agua = mean(indice_atendimento_esgoto_agua, na.rm = TRUE),
+            .groups = "drop")
+
+
+ufs <- geobr::read_state(code_state = "all", year = 2020, simplified = TRUE)
+
+# 2) Join por sigla (geobr usa 'abbrev_state')
+map_sf <- ufs %>%
+  left_join(map_dat, by = c("abbrev_state" = "sigla_uf"))
+
+# 3) Mapa
+ggplot(map_sf) +
+  geom_sf(aes(fill = indice_atendimento_esgoto_agua), color = "white", linewidth = 0.2) +
+  scale_fill_gradient(
+    low = "red", high = "white", na.value = "grey90",
+    name = "Índice (esgoto/água)"
+  ) +
+  labs(
+    title = "Índice de atendimento esgoto/água por UF",
+    subtitle = "Mais vermelho = menor índice • Mais claro = maior índice",
+    caption = "Fonte: SNIS + Atlas do Desenvolvimento Humano"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+```
+
+Neste último gráfico é possível notar uma maior concetração de estados no norte/nordeste com baixo índice de atendimento total de esgoto referido aos estados atendidos com água. Ao passo que no sudeste estão localizados os estados com o maior índice. Através do gráfico vemos a desigualdade no nível de serviço de esgoto entre as diversas regiões do país.  
+
+
+
+
+
