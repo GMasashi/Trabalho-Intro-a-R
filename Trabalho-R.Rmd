@@ -1,0 +1,709 @@
+---
+title: "Trabalho-R"
+author: "Gustavo Masashi"
+date: "2025-11-30"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    theme: cosmo
+    self_contained: true 
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,        # mostrar código por padrão
+  message = FALSE,    # esconder mensagens de pacote
+  warning = FALSE)    # esconder warnings
+```
+
+
+
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(stringr)
+library(flexdashboard)
+library(scales)
+library(leaflet)
+library(sf)
+library(geobr)
+library(ggplot2)
+library(shiny)
+library(reactable)
+library(rsconnect)
+
+#Fonte https://www.ipea.gov.br/cartadeconjuntura/index.php/series-estatisticas-conjunturais-2/
+
+```
+
+Home {#section-home}
+=====================
+### Explicação das variáveis  
+As seguintes variáveis estão presentes no conjunto de dados:
+
+- **Ipca**: é a inflação no período. No trabalho usei tanto a variacao no mes quanto a acumulada em 12 meses
+
+-**Concessao de Credito**: capta o valor concedido em credito, vindo de recursos livres ou direcionados, para pf ou pj
+
+-**Ipca regional**: para fazer o mapa requisitado, utilizei dados do IBGE para indicar a variacao da inflacao no mes de outubro de 2025 em alguns estados do pais que fazem sua propria mensuracao 
+
+-**Fontes**: https://www.ipea.gov.br/cartadeconjuntura/index.php/series-estatisticas-conjunturais-2/ e IBGE 
+
+```{r Importando dados}
+caminho_inflacao <- "C:\\Users\\Desk-Top\\Downloads\\240716_inflacao.xlsx"
+caminho_pm <- "C:\\Users\\Desk-Top\\Downloads\\240716_politica_monetaria.xlsx"
+caminho_ipca_regional <- "C:\\Users\\Desk-Top\\Downloads\\tabela7061.xlsx"
+
+inflacao_tab5 <- read_excel(caminho_inflacao, sheet = 6)
+inflacao_tab6 <- read_excel(caminho_inflacao, sheet = 7)
+inflacao_tab7 <- read_excel(caminho_inflacao, sheet = 8)
+inflacao_tab9 <- read_excel(caminho_inflacao, sheet = 10)
+
+pm_tab2 <- read_excel(caminho_pm, sheet = 3)
+pm_tab3 <- read_excel(caminho_pm, sheet = 4)
+pm_tab4 <- read_excel(caminho_pm, sheet = 5)
+
+ipca_regional <- read_excel(caminho_ipca_regional, sheet = 2)
+```
+
+```{r Tratamento das tabelas de Política Monetaria}
+pm_tab2 <- pm_tab2 %>%
+  slice(-(1:6))
+
+pm_tab3 <- pm_tab3 %>%
+  slice(-(1:6))
+
+pm_tab4 <- pm_tab4 %>%
+  slice(-(1:6))
+
+names(pm_tab2) <- c(
+  "ano", "mes",
+  "saldos_pj", "saldos_pf", "saldos_total",
+  "concessoes_acum_pj", "concessoes_acum_pf", "concessoes_acum_total",
+  "taxa_juros_pj", "taxa_juros_pf", "taxa_juros_total",
+  "spread_pj", "spread_pf", "spread_total",
+  "prazo_carteira_pj", "prazo_carteira_pf", "prazo_carteira_total",
+  "prazo_concessoes_pj", "prazo_concessoes_pf", "prazo_concessoes_total",
+  "inadimplencia_pj", "inadimplencia_pf", "inadimplencia_total"
+)
+
+meses_validos <- c(
+  "janeiro","fevereiro","março","abril","maio","junho",
+  "julho","agosto","setembro","outubro","novembro","dezembro"
+)
+
+pm_tab2 <- pm_tab2 %>%
+  mutate(
+    mes = str_to_lower(as.character(mes))
+  ) %>%
+  filter(mes %in% meses_validos | is.na(mes))
+
+pm_tab2 <- pm_tab2 %>%
+  fill(ano, .direction = "down")
+
+pm_tab2 <- pm_tab2 %>%
+  slice(-1)
+
+credito_total <- pm_tab2 %>%
+  filter(!ano %in% c(2011,2024))
+
+names(pm_tab3) <- c(
+  "ano", "mes",
+  "saldos_pj", "saldos_pf", "saldos_total",
+  "concessoes_acum_pj", "concessoes_acum_pf", "concessoes_acum_total",
+  "taxa_juros_pj", "taxa_juros_pf", "taxa_juros_total",
+  "spread_pj", "spread_pf", "spread_total",
+  "prazo_carteira_pj", "prazo_carteira_pf", "prazo_carteira_total",
+  "prazo_concessoes_pj", "prazo_concessoes_pf", "prazo_concessoes_total",
+  "inadimplencia_pj", "inadimplencia_pf", "inadimplencia_total"
+)
+
+pm_tab3 <- pm_tab3 %>%
+  mutate(
+    mes = str_to_lower(as.character(mes))
+  ) %>%
+  filter(mes %in% meses_validos | is.na(mes))
+
+pm_tab3 <- pm_tab3 %>%
+  fill(ano, .direction = "down")
+
+pm_tab3 <- pm_tab3 %>%
+  slice(-1)
+
+
+credito_livre <- pm_tab3 %>%
+  filter(!ano %in% c(2011,2024))
+
+names(pm_tab4) <- c(
+  "ano", "mes",
+  "saldos_pj", "saldos_pf", "saldos_total",
+  "concessoes_acum_pj", "concessoes_acum_pf", "concessoes_acum_total",
+  "taxa_juros_pj", "taxa_juros_pf", "taxa_juros_total",
+  "spread_pj", "spread_pf", "spread_total",
+  "prazo_carteira_pj", "prazo_carteira_pf", "prazo_carteira_total",
+  "prazo_concessoes_pj", "prazo_concessoes_pf", "prazo_concessoes_total",
+  "inadimplencia_pj", "inadimplencia_pf", "inadimplencia_total"
+)
+
+pm_tab4 <- pm_tab4 %>%
+  mutate(
+    mes = str_to_lower(as.character(mes))
+  ) %>%
+  filter(mes %in% meses_validos | is.na(mes))
+
+pm_tab4 <- pm_tab4 %>%
+  fill(ano, .direction = "down")
+
+pm_tab4 <- pm_tab4 %>%
+  slice(-1)
+
+credito_direcionado <- pm_tab4 %>%
+    filter(!ano %in% c(2011,2024))
+```
+
+```{r Tratamento da inflacao variacao mensal e acumulada em 12 meses}
+
+inflacao_tab5 <- inflacao_tab5 %>%
+  slice(-(1:8))
+
+inflacao_tab6 <- inflacao_tab6 %>%
+  slice(-(1:8))
+
+names(inflacao_tab5) <- c(
+  "ano",
+  "mes",
+  "ipca_geral",
+  "livres_total",
+  "livres_comerc",
+  "livres_nao_comerc",
+  "monitorados"
+)
+
+inflacao_tab5 <- inflacao_tab5 %>%
+  mutate(mes = str_to_lower(as.character(mes))) %>%
+  filter( mes %in% meses_validos)
+
+inflacao_tab5 <- inflacao_tab5 %>%
+  fill(ano, .direction = "down")
+
+inflacao_var <- inflacao_tab5 %>% filter(!ano %in% c(2010,2011,2024))
+
+names(inflacao_tab6) <- c(
+  "ano",
+  "mes",
+  "ipca12_geral",
+  "livres12_total",
+  "livres12_comerc",
+  "livres12_nao_comerc",
+  "monitorados12"
+)
+
+inflacao_tab6 <- inflacao_tab6 %>%
+  mutate(mes = str_to_lower(as.character(mes))) %>%
+  filter( mes %in% meses_validos)
+
+inflacao_tab6 <- inflacao_tab6 %>%
+  fill(ano, .direction = "down")
+
+inflacao_acum12 <- inflacao_tab6 %>% filter(!ano %in% c(2010,2011,2024))
+
+```
+
+```{r Tratamento da inflacao por cartegoria}
+inflacao_tab7 <- inflacao_tab7 %>%
+  slice(-(1:8))
+
+names(inflacao_tab7) <- c(
+  "ano",
+  "mes",
+  "ipca_geral",
+  "livres_total",
+  "bens_duraveis",
+  "bens_semi_duraveis",
+  "bens_nao_duraveis",
+  "servicos",
+  "monitorados"
+)
+
+inflacao_tab7 <- inflacao_tab7 %>%
+  mutate(mes = str_to_lower(as.character(mes))) %>%
+  filter( mes %in% meses_validos)
+
+
+inflacao_tab7 <- inflacao_tab7 %>%
+  fill(ano, .direction = "down")
+
+inflacao_cartegoria <- inflacao_tab7 %>%
+  filter(!ano %in% c(2010,2011,2024))
+```
+
+```{r Tratemento da inflacao por grupos}
+inflacao_tab9 <- inflacao_tab9 %>%
+  slice(-(1:8))
+
+names(inflacao_tab9) <- c(
+  "ano",
+  "mes",
+  "ipca_geral",
+  "alimentacao_bebidas",
+  "habitacao",
+  "artigos_residencia",
+  "vestuario",
+  "transportes",
+  "saude_cuidados_pessoais",
+  "despesas_pessoais",
+  "educacao",
+  "comunicacao"
+)
+
+inflacao_tab9 <- inflacao_tab9 %>%
+  mutate(mes = str_to_lower(as.character(mes))) %>%
+  filter( mes %in% meses_validos)
+
+inflacao_tab9 <- inflacao_tab9 %>%
+  fill(ano, .direction = "down")
+
+inflacao_grupos <- inflacao_tab9 %>%
+  filter(!ano %in% c(2010,2011,2024))
+
+```
+
+```{r Criando df com metas de inflacao e intervalos}
+#Uso do ChatGPT
+metas_anuais <- tibble::tibble(
+  ano   = 2012:2023,
+  meta  = c(4.5, 4.5, 4.5, 4.5, 4.5,
+            4.5, 4.5, 4.25, 4.0, 3.75,
+            3.5, 3.25),
+  banda = c(rep(2.0, 5),   # 2012-2016
+            rep(1.5, 7))   # 2017-2023
+) %>%
+  mutate(
+    limite_inf = meta - banda,
+    limite_sup = meta + banda
+  )
+
+metas_mensais <- metas_anuais %>%
+  tidyr::expand(ano, mes = 1:12) %>%       # cria todas combinações ano–mês
+  left_join(metas_anuais, by = "ano")   # replica meta/banda em todos os m  # 1º dia de cada mês
+```
+
+
+
+```{r Dando Join}
+inf <- left_join(inflacao_var, credito_total, by = c("mes", "ano"))
+```
+
+```{r Tratando IPCA regional}
+ipca_regional <- ipca_regional %>%
+  slice(-(1:5)) %>% slice(-21)
+
+```
+
+Ipca x concessoes de credito
+====================
+
+```{r}
+#Uso do ChatGPT para ajustar erros 
+
+inf_plot <- inf %>%
+  mutate(
+    # garante tipos certos
+    ano                   = as.integer(ano),
+    mes_txt               = tolower(trimws(mes)),
+    ipca_geral            = as.numeric(ipca_geral),
+    concessoes_acum_total = as.numeric(concessoes_acum_total),
+
+    # transforma nome do mês em número
+    mes_num = case_when(
+      mes_txt == "janeiro"   ~ 1L,
+      mes_txt == "fevereiro" ~ 2L,
+      mes_txt == "março"     ~ 3L,
+      mes_txt == "abril"     ~ 4L,
+      mes_txt == "maio"      ~ 5L,
+      mes_txt == "junho"     ~ 6L,
+      mes_txt == "julho"     ~ 7L,
+      mes_txt == "agosto"    ~ 8L,
+      mes_txt == "setembro"  ~ 9L,
+      mes_txt == "outubro"   ~ 10L,
+      mes_txt == "novembro"  ~ 11L,
+      mes_txt == "dezembro"  ~ 12L,
+      TRUE                   ~ NA_integer_
+    ),
+
+    # cria uma data (1º dia de cada mês)
+    data_mes = as.Date(sprintf("%d-%02d-01", ano, mes_num))
+  ) %>%
+  arrange(data_mes) %>%
+  select(data_mes, ipca_geral, concessoes_acum_total)
+
+inf_long <- inf_plot %>%
+  pivot_longer(
+    cols = c(ipca_geral, concessoes_acum_total),
+    names_to  = "serie",
+    values_to = "valor"
+  )
+
+ggplot(inf_long, aes(x = data_mes, y = valor, color = serie, group = serie)) +
+  geom_line() +
+  scale_y_continuous(breaks = pretty_breaks(n = 5)) +
+  scale_x_date(
+    date_breaks = "3 months",      # ajuste se quiser mais ou menos rótulos
+    date_labels = "%b/%y"          # Jan/23, Fev/23, ...
+  ) +
+  labs(
+    x = "Mês",
+    y = NULL,
+    title = "IPCA geral e concessões acumuladas (total)",
+    color = ""
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+  )
+```
+
+
+IPCA acumulado em 12 meses x Metas e bandas de inflacao
+============================
+
+```{r}
+#Uso do ChatGPT para ajuste de erros
+
+inflacao_acum12_plot <- inflacao_acum12 %>%
+  mutate(
+    ano      = as.integer(ano),
+    mes_txt  = tolower(trimws(mes)),
+    mes_num = case_when(
+      mes_txt == "janeiro"   ~ 1L,
+      mes_txt == "fevereiro" ~ 2L,
+      mes_txt == "março"     ~ 3L,
+      mes_txt == "abril"     ~ 4L,
+      mes_txt == "maio"      ~ 5L,
+      mes_txt == "junho"     ~ 6L,
+      mes_txt == "julho"     ~ 7L,
+      mes_txt == "agosto"    ~ 8L,
+      mes_txt == "setembro"  ~ 9L,
+      mes_txt == "outubro"   ~ 10L,
+      mes_txt == "novembro"  ~ 11L,
+      mes_txt == "dezembro"  ~ 12L,
+      TRUE                   ~ NA_integer_
+    ),
+    data_mes     = as.Date(sprintf("%d-%02d-01", ano, mes_num)),
+    ipca12_geral = as.numeric(ipca12_geral)
+  ) %>%
+  arrange(data_mes)
+
+## Metas: garantir data_mes também
+metas_mensais_plot <- metas_mensais %>%
+  mutate(
+    ano     = as.integer(ano),
+    mes     = as.integer(mes),
+    data_mes = as.Date(sprintf("%d-%02d-01", ano, mes))
+  ) %>%
+  select(data_mes, meta, limite_inf, limite_sup)
+
+## Juntar IPCA12 + metas pela data
+base_plot <- inflacao_acum12_plot %>%
+  left_join(metas_mensais_plot, by = "data_mes")
+
+ggplot(base_plot, aes(x = data_mes)) +
+  geom_ribbon(aes(ymin = limite_inf, ymax = limite_sup, fill = "Banda"),
+              alpha = 0.1, colour = NA) +           # banda da meta (se tiver)
+  geom_line(aes(y = meta, colour = "Meta"), linetype = "dashed") +  # meta
+  geom_line(aes(y = ipca12_geral, colour = "IPCA 12m")) +          # IPCA 12m
+  scale_y_continuous(breaks = pretty_breaks(n = 5)) +
+  scale_x_date(
+    date_breaks = "3 months",
+    date_labels = "%b/%y"
+  ) +
+  scale_colour_manual(
+    values = c("IPCA 12m" = "black", "Meta" = "red"),
+    name   = NULL
+  ) +
+  scale_fill_manual(
+    values = c("Banda" = "red"),
+    name   = NULL
+  ) +
+  labs(
+    x = "Mês",
+    y = NULL,
+    title = "IPCA acumulado em 12 meses vs Meta de inflação"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+  )
+```
+
+
+Inflacao do mes de dezembro de 2023 separada por grupos
+==============================
+
+
+```{r}
+#uso do ChatGPT para ajustes de erros
+
+inflacao_grupos <- inflacao_grupos %>%
+  mutate(
+    ano  = as.integer(ano),
+    mes  = tolower(trimws(mes)),
+    mes_num = match(mes, meses_validos),
+    ipca_geral              = as.numeric(ipca_geral),
+    alimentacao_bebidas     = as.numeric(alimentacao_bebidas),
+    habitacao               = as.numeric(habitacao),
+    artigos_residencia      = as.numeric(artigos_residencia),
+    vestuario               = as.numeric(vestuario),
+    transportes             = as.numeric(transportes),
+    saude_cuidados_pessoais = as.numeric(saude_cuidados_pessoais),
+    despesas_pessoais       = as.numeric(despesas_pessoais),
+    educacao                = as.numeric(educacao),
+    comunicacao             = as.numeric(comunicacao)
+  ) %>%
+  arrange(ano, mes_num)
+
+# 2) Pegar o ÚLTIMO mês disponível na série
+ultimo_mes <- inflacao_grupos %>%
+  slice_tail(n = 1)
+
+# 3) Deixar os grupos em formato longo
+inflacao_grupos_ultimo <- ultimo_mes %>%
+  select(
+    ano, mes, ipca_geral,
+    alimentacao_bebidas,
+    habitacao,
+    artigos_residencia,
+    vestuario,
+    transportes,
+    saude_cuidados_pessoais,
+    despesas_pessoais,
+    educacao,
+    comunicacao
+  ) %>%
+  pivot_longer(
+    cols = c(alimentacao_bebidas, habitacao, artigos_residencia,
+             vestuario, transportes, saude_cuidados_pessoais,
+             despesas_pessoais, educacao, comunicacao),
+    names_to  = "grupo",
+    values_to = "valor"
+  ) %>%
+  mutate(
+    grupo = recode(
+      grupo,
+      "alimentacao_bebidas"     = "Alimentação e bebidas",
+      "habitacao"               = "Habitação",
+      "artigos_residencia"      = "Artigos de residência",
+      "vestuario"               = "Vestuário",
+      "transportes"             = "Transportes",
+      "saude_cuidados_pessoais" = "Saúde e cuidados pessoais",
+      "despesas_pessoais"       = "Despesas pessoais",
+      "educacao"                = "Educação",
+      "comunicacao"             = "Comunicação"
+    )
+  )
+
+# 4) Gráfico de barras horizontal (um mês)
+ggplot(inflacao_grupos_ultimo,
+       aes(x = reorder(grupo, valor), y = valor)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(labels = label_percent(accuracy = 0.1, scale = 1)) +
+  labs(
+    x = NULL,
+    y = "Variação no mês (%)",
+    title = paste0(
+      "IPCA por grupo – ",
+      ultimo_mes$mes, "/", ultimo_mes$ano
+    )
+  ) +
+  theme_minimal()
+```
+
+
+Mapa com dados regionais de inflacao
+=====================================
+
+```{r}
+#uso do ChatGPT para ajustes de erros
+
+ipca_capitais <- ipca_regional %>%
+  # aqui eu assumo que a 1ª coluna é o nome da região e a 2ª é o valor
+  rename(
+    local = 1,
+    valor = 2
+  ) %>%
+  mutate(
+    local = as.character(local),
+    valor = as.numeric(valor)
+  ) %>%
+  # tira Brasil e as RMs
+  filter(
+    !is.na(valor),              # tira linha vazia se tiver
+    local != "Brasil",
+    !str_detect(local, "^RM")
+  ) %>%
+  mutate(
+    # extrai UF entre parênteses: (PA) -> "PA"
+    uf = str_extract(local, "\\([A-Z]{2}\\)"),
+    uf = str_replace_all(uf, "[()]", ""),
+    # nome da cidade: tudo antes do "("
+    cidade = str_trim(str_remove(local, "\\s*\\(.*\\)$"))
+  )
+
+munis <- geobr::read_municipality(year = 2020, showProgress = FALSE)
+
+# ficar só com as cidades que estão na tabela
+munis_capitais <- munis %>%
+  filter(
+    name_muni %in% ipca_capitais$cidade,
+    abbrev_state %in% ipca_capitais$uf
+  )
+
+# juntar shape + inflação
+mapa_ipca <- munis_capitais %>%
+  left_join(
+    ipca_capitais,
+    by = c("name_muni" = "cidade", "abbrev_state" = "uf")
+  )
+
+# paleta de cores
+pal <- colorNumeric(
+  palette = "YlOrRd",
+  domain  = mapa_ipca$valor
+)
+
+leaflet(mapa_ipca) %>%
+  addTiles() %>%
+  addPolygons(
+    fillColor   = ~pal(valor),
+    weight      = 1,
+    color       = "#555555",
+    fillOpacity = 0.8,
+    smoothFactor = 0.3,
+    label = ~paste0(
+      name_muni, " (", abbrev_state, "): ",
+      round(valor, 2), "%"
+    ),
+    highlightOptions = highlightOptions(
+      weight = 2,
+      color  = "black",
+      bringToFront = TRUE
+    )
+  ) %>%
+  addLegend(
+    "bottomright",
+    pal    = pal,
+    values = ~valor,
+    title  = "IPCA dessazonalizado (%)",
+    opacity = 0.8
+  )
+
+
+```
+
+
+Tabela do principal data frame
+===================
+```{r}
+inf_tabela <- inf %>%
+  mutate(
+    ipca_geral            = as.numeric(ipca_geral),
+    concessoes_acum_total = as.numeric(concessoes_acum_total)
+  ) %>%
+  select(ano, mes, ipca_geral, concessoes_acum_total)
+
+reactable(
+  inf_tabela,
+  # busca global no topo
+  searchable = TRUE,
+  # paginação
+  pagination = TRUE,
+  defaultPageSize = 20,
+  # zebra + highlight
+  striped  = TRUE,
+  highlight = TRUE,
+  bordered = TRUE,
+  resizable = TRUE,
+  
+  # filtros em TODAS as colunas por padrão
+  defaultColDef = colDef(
+    filterable  = TRUE,
+    headerClass = "header",
+    align       = "center"
+  ),
+  
+  # nomes e formatos das colunas
+  columns = list(
+    ano = colDef(
+      name       = "Ano",
+      filterable = TRUE
+    ),
+    mes = colDef(
+      name       = "Mês",
+      filterable = TRUE
+    ),
+    ipca_geral = colDef(
+      name   = "IPCA geral (%)",
+      format = colFormat(digits = 2),
+      align  = "right"
+    ),
+    concessoes_acum_total = colDef(
+      name   = "Concessões acum. total",
+      format = colFormat(digits = 2),
+      align  = "right"
+    )
+  ),
+  
+  # agrupar visualmente as colunas de inflação x crédito (opcional)
+  columnGroups = list(
+    colGroup(name = "Informação básica", columns = c("ano", "mes")),
+    colGroup(name = "Inflação e crédito", columns = c("ipca_geral", "concessoes_acum_total"))
+  ),
+  
+  # ordenação inicial
+  defaultSorted   = "ano",
+  defaultSortOrder = "asc"
+)
+```
+
+
+
+Conclusoes
+=======================
+
+-**IPCA x Credito**
+Podemos perceber certa correlacao nos movimentos dos dois indicadores o que condiz com a intuicao economica. O credito indicaria maior consumo que tende a pressionar a inflacao.
+
+Apesar de estarem medidos em escalas diferentes, o sinal do movimento esta relativamente sincronizado
+
+
+-**IPCA acumulado**:
+Como podemos ver pelo grafico, tem periodos em que a inflacao acumulada superou em muito a banda superior da meta de inflacao e poucas vezes este no centro da meta
+
+-**IPCA dezembo 2023**:
+O grupo que mais contribuiu para a inflca em dezembro de 2023 foi o de alimentos e bebidas junto de artigos de residencia enquanto saude e cuidados pessoais  e comunicacao foram os que menos contribuiram
+
+-**Mapa**:
+O grupo que mais contribuiu para a inflca em dezembro de 2023 foi o de alimentos e bebidas junto de artigos de residencia enquanto saude e cuidados pessoais  e comunicacao foram os que menos contribuiram
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
